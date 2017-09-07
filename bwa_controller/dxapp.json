@@ -1,0 +1,96 @@
+{
+  "name": "bwa_controller",
+  "title": "BWA Controller",
+  "summary": "Align reads with bwa",
+  "dxapi": "1.0.0",
+  "inputSpec": [
+    {
+      "name": "record_link",
+      "label": "SCGPM record DXLink",
+      "help": "Sequencing lane dashboard record in format: project-XXX:record-YYY",
+      "class": "string",
+      "optional": false
+    },
+    {
+      "name": "output_folder",
+      "label": "Output folder",
+      "class": "string",
+      "optional": false,
+      "default": "/stage1_bwa"
+    },
+    {
+      "name": "worker_id",
+      "label": "Worker ID",
+      "help": "ID of map_sample applet",
+      "class": "string",
+      "optional": false
+    },
+    {
+      "name": "worker_project",
+      "label": "Worker project ID",
+      "class": "string",
+      "optional": false
+    },
+    {
+      "name": "fastqs",
+      "label": "Fastq files",
+      "class": "array:file",
+      "patterns": ["*fastq.gz", "*.fastq", "*.fq.gz"],
+      "optional": false
+    },
+    {
+      "name": "mark_duplicates",
+      "label": "Mark Duplicates",
+      "class": "boolean",
+      "optional": true,
+      "default": false
+    }
+  ],
+  "outputSpec": [
+    {
+      "name": "bams",
+      "label": "Bam files",
+      "class": "array:file"
+    },
+    {
+      "name": "bais",
+      "label": "Bai files",
+      "class": "array:file"
+    },
+    {
+      "name": "tools_used",
+      "class": "array:file"
+    }
+  ],
+  "runSpec": {
+    "systemRequirementsByRegion": {
+      "azure:westus": {
+        "*": {
+          "instanceType": "azure:mem2_ssd1_x2"
+        }
+      }
+    },
+    "systemRequirements": {
+      "*": {
+        "instanceType": "azure:mem2_ssd1_x2"
+      }
+    },
+    "file": "src/code.py",
+    "release": "12.04",
+    "interpreter": "python2.7",
+    "distribution": "Ubuntu"
+  },
+  "access": {
+    "allProjects": "ADMINISTER",
+    "network": [
+      "*"
+    ]
+  },
+  "details": {
+    "commit": "1.3-4-g1f0d755",
+    "version": "1.3.1",
+    "name": "bwa_controller",
+    "branch": "master",
+    "date_created": "2016-10-20"
+  }
+}

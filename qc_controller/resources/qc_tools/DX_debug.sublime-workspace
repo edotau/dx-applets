@@ -1,0 +1,620 @@
+{
+	"auto_complete":
+	{
+		"selected_items":
+		[
+			[
+				"com",
+				"com"
+			],
+			[
+				"WF_b",
+				"WF_bcl2fastq_bwa_qc"
+			],
+			[
+				"dashb",
+				"dashboard_project_dxid"
+			],
+			[
+				"get_SCGPM_fastq_name_rta",
+				"get_SCGPM_fastq_name_rta_v1"
+			],
+			[
+				"dashboard_project_id",
+				"dashboard_project_id"
+			],
+			[
+				"bcl",
+				"bcl2fastq_version"
+			],
+			[
+				"bcl2fastq_dxid",
+				"dxapplet_bcl2fastq_dxid"
+			],
+			[
+				"record",
+				"records"
+			],
+			[
+				"hap_vals",
+				"non_hap_vals"
+			],
+			[
+				"covar",
+				"covar"
+			],
+			[
+				"n",
+				"n"
+			],
+			[
+				"associations",
+				"associations"
+			],
+			[
+				"config_data",
+				"config_data"
+			],
+			[
+				"external_rsc_config",
+				"external_rsc_config"
+			],
+			[
+				"internal_res",
+				"internal_resources_path"
+			],
+			[
+				"name",
+				"name"
+			],
+			[
+				"applet_path",
+				"applet_path"
+			],
+			[
+				"self",
+				"self"
+			],
+			[
+				"EXIST",
+				"exists"
+			],
+			[
+				"json",
+				"json"
+			],
+			[
+				"home",
+				"home"
+			],
+			[
+				"yie",
+				"yield_line"
+			],
+			[
+				"run",
+				"run"
+			],
+			[
+				"published_",
+				"published_runs_dir"
+			],
+			[
+				"to",
+				"to"
+			],
+			[
+				"t",
+				"t"
+			],
+			[
+				"lane",
+				"lane"
+			]
+		]
+	},
+	"buffers":
+	[
+		{
+			"file": "/Users/pbilling/Documents/DNAnexus/development_files/test_hiseq4000/qc_tools/plot_qscore_summary.r",
+			"settings":
+			{
+				"buffer_size": 1960,
+				"line_ending": "Unix"
+			}
+		},
+		{
+			"file": "/Users/pbilling/Documents/DNAnexus/development_files/test_hiseq4000/qc_tools/illumina_qscores.out",
+			"settings":
+			{
+				"buffer_size": 17447,
+				"line_ending": "Unix",
+				"name": "q1 q2 q3 q4 q5 q6 q7"
+			}
+		},
+		{
+			"contents": "#!/usr/bin/env ruby\n\n#\n# illumina_qscores.rb: produce statistics from an Illumina quality-metrics\n# interop file.\n#\n# Phil Lacroute\n#\n\nrequire 'optparse'\nrequire 'tempfile'\n\nclass IlluminaQScores\n\n  def initialize\n    @counts = Hash.new\n    @max_cycle = 0\n    @min_qual = 1\n    @max_qual = 50\n  end\n\n  def parse_args\n    opts = OptionParser.new do |opts|\n      opts.banner = \"Usage: illumina_qscores.rb options\"\n      opts.separator \"Options:\"\n\n      opts.on(\"--qmetrics FILE\",\n              \"input filename (e.g. QMetricsOut.bin, required)\") do |file|\n        @qmetrics_file = file\n      end\n\n      opts.on(\"--details_plot FILE\", \"detailed plot output file\") do |file|\n        @details_plot = file\n      end\n\n      opts.on(\"--summary_plot FILE\", \"summary plot output file\") do |file|\n        @summary_plot = file\n      end\n\n      opts.on(\"--lane NUM\", \"lane number (required)\") do |num|\n        @lane = num.to_i\n      end\n\n      opts.on(\"--read_lengths LENGTH1,LENGTH2,LENGTH3\", Array,\n              \"read lengths (bases)\") do |list|\n        @read_lengths = list\n      end\n\n      opts.on(\"--force\", \"Continue past some error conditions\") do\n         @force = true\n      end\n\n      opts.on(\"--verbose\", \"print verbose messages\") do\n        @verbose = true\n      end\n\n      opts.on(\"--debug\", \"print debugging messages\") do\n        @debug = true\n      end\n\n      opts.on_tail(\"-h\", \"--help\", \"print help message\") do\n        puts opts\n        exit\n      end\n    end\n\n    @debug = true   # Manually activating debug mode\n\n    if ARGV.empty?\n      puts opts\n      exit\n    end\n\n    begin\n      opts.parse!(ARGV)\n    rescue OptionParser::ParseError => err\n      STDERR.puts err.to_s\n      exit 1\n    end\n\n    if ARGV.size > 0\n      STDERR.puts \"error: unexpected arguments\"\n      exit 1\n    end\n\n    if @qmetrics_file.nil?\n      STDERR.puts \"error: --qmetrics is required\"\n      exit 1\n    end\n\n    if @lane.nil?\n      STDERR.puts \"error: --lane is required\"\n      exit 1\n    end\n  end\n\n  def readb(ios, bytecnt, format, opts = {})\n    rawdata = ios.read(bytecnt)\n    if rawdata.nil?\n      if opts[:required]\n        STDERR.puts \"error: input file is truncated\"\n        exit 1\n      else\n        return nil\n      end\n    end\n    data = rawdata.unpack(format)\n    if opts[:single]\n      return data[0]\n    else\n      return data\n    end\n  end\n\n  def read_metrics\n    puts \"Reading #{@qmetrics_file}:\" if @verbose\n    (1..8).each {|lane| @counts[lane] = Hash.new}\n    ios = File.open(@qmetrics_file, \"rb\")\n    version = readb(ios, 1, 'C', :required => true, :single => true)\n    puts \"Version: #{version}\" if @verbose\n    case version\n    when 4\n      read_metrics_v4(ios)\n    when 5\n      read_metrics_v5(ios)\n    when 6\n      read_metrics_v6(ios)\n    else\n      STDERR.puts \"error: invalid file format version number #{version}\"\n      exit 1\n    end\n    ios.close\n  end\n\n  def read_metrics_v4(ios)\n    record_len = readb(ios, 1, 'C', :required => true, :single => true)\n    puts \"Record Length: #{record_len}\" if @verbose\n    eof = false\n    while !eof do\n      record = readb(ios, record_len, 'S3L50')\n      break if record.nil?\n      lane = record[0]\n      tile = record[1]\n      cycle = record[2]\n      @max_cycle = cycle if cycle > @max_cycle\n      if @counts[lane].nil?\n        STDERR.puts \"read_metrics_v4(): error: invalid lane #{lane}\"\n        if @force\n          next\n        else\n          exit 1\n        end\n      end\n      if @counts[lane][cycle].nil?\n        @counts[lane][cycle] = Hash.new\n      end\n      @counts[lane][cycle][tile] = Hash.new if @counts[lane][cycle][tile].nil?\n      ccounts = @counts[lane][cycle][tile]\n      (1..50).each do |score|\n        # Don't know why Phil was adding these across all the tiles, but it\n        # seems that only the last record for any lane/tile/cycle is valid.\n        # ccounts[score] = 0 if ccounts[score].nil?\n        # ccounts[score] += record[(score - 1) + 3]\n        ccounts[score] = record[(score - 1) + 3]\n        #print \"#{ccounts[score]} \" if @debug\n      end\n      #print \"\\n\" if @debug\n    end\n    puts \"Found #{cycle} cycles.\" if @verbose\n  end\n\n  def read_metrics_v5(ios)\n    record_len = readb(ios, 1, 'C', :required => true, :single => true)\n        byte2 = readb(ios,1,'C',:required => true, :single => true)\n        if byte2 == 1 #then quality score binning on; skip the next X bytes as we don't use them in the pipeline as of present:\n      puts \"Quality score binning on\"\n            byte3 = readb(ios, 1, 'C', :required => true, :single => true) #number of quality score bins B\n            readb(ios,4 - (4 + byte3 - 1),'C',:required => true) #lower boundary of quality score bins. Skip these bytes\n            readb(ios,(4 + byte3) - (4 + 2*byte3 - 1),'C',:required => true) #upper boundary of quality score bins. Skip these bytes.\n            readb(ios,(4 + 2*byte3) - (4 + 3*byte3 - 1),'C',:required => true) #remapped scores of quality score bins. Skip these bytes.\n        end\n    puts \"Record Length: #{record_len}\" if @verbose\n    eof = false\n    while !eof do\n      record = readb(ios, record_len, 'S3L50')\n      break if record.nil?\n      lane = record[0]\n      tile = record[1]\n      cycle = record[2]\n      @max_cycle = cycle if cycle > @max_cycle\n      if @counts[lane].nil?\n        STDERR.puts \"read_metrics_v4(): error: invalid lane #{lane}\"\n        if @force\n          next\n        else\n          exit 1\n        end\n      end\n      if @counts[lane][cycle].nil?\n        @counts[lane][cycle] = Hash.new\n      end\n      @counts[lane][cycle][tile] = Hash.new if @counts[lane][cycle][tile].nil?\n      ccounts = @counts[lane][cycle][tile]\n      (1..50).each do |score|\n        # Don't know why Phil was adding these across all the tiles, but it\n        # seems that only the last record for any lane/tile/cycle is valid.\n        # ccounts[score] = 0 if ccounts[score].nil?\n        # ccounts[score] += record[(score - 1) + 3]\n        ccounts[score] = record[(score - 1) + 3]\n        #print \"#{ccounts[score]} \" if @debug\n      end\n      #print \"\\n\" if @debug\n    end\n    puts \"Found #{@max_cycle} cycles.\" if @verbose\n  end\n\n  def read_metrics_v6(ios)\n    @max_qual = 7   # Only 7 quality bins used (see: illumina whitepaper_datacompression.pdf)\n    record_len = readb(ios, 1, 'C', :required => true, :single => true)\n    puts \"Record Length: #{record_len}\" if @verbose\n    \n    lowB = Array.new\n    upB = Array.new\n    remapB = Array.new\n    nBins = 50\n\n    # Need to check whether quality score binning is on\n    # Currently don't do anything with binning data if it exists\n    binning = readb(ios, 1, 'C', :required => true, :single => true)\n    case binning\n    when 1\n      STDOUT.puts \"Quality score binning: ON\"\n      nBins = readb(ios, 1, 'C', :required => true, :single => true)\n      # STDOUT.puts nBins   # debug line\n      (1..nBins).each do\n        lowB.push(readb(ios, 1, 'C', :required => true, :single => true))\n      end\n      # STDOUT.puts lowB    # debug line\n      (1..nBins).each do\n        upB.push(readb(ios, 1, 'C', :required => true, :single => true))\n      end\n      # STDOUT.puts \"#{upB}\"  # debug line\n      (1..nBins).each do\n        remapB.push(readb(ios, 1, 'C', :required => true, :single => true))\n      end\n    #  STDOUT.puts \"#{remapB}\"    # debug line\n    else\n        STDOUT.puts \"Quality score binning: OFF\"\n    end\n    eof = false\n    while !eof do\n      record = readb(ios, record_len, 'S3L50')\n      # STOUT.puts \"#{record}\"\n      break if record.nil?\n      lane = record[0]\n      tile = record[1]\n      cycle = record[2]\n      # STDOUT.puts \"lane: #{lane}, tile: #{tile}, cycle: #{cycle}\"\n      @max_cycle = cycle if cycle > @max_cycle\n      if @counts[lane].nil?\n        STDERR.puts \"read_metrics_v6(): error: invalid lane #{lane}\"\n        if @force\n          next\n        else\n          exit 1\n        end\n      end\n      # Creates new lane/cycle hash if it does not exist\n      if @counts[lane][cycle].nil?\n        @counts[lane][cycle] = Hash.new\n      end\n      @counts[lane][cycle][tile] = Hash.new if @counts[lane][cycle][tile].nil?\n      ccounts = @counts[lane][cycle][tile]\n      (1..@max_qual).each do |score|\n      #(1..50).each do |score|\n        # Don't know why Phil was adding these across all the tiles, but it\n        # seems that only the last record for any lane/tile/cycle is valid.\n        # ccounts[score] = 0 if ccounts[score].nil?\n        # ccounts[score] += record[(score - 1) + 3]\n        ccounts[score] = record[(score - 1) + 3]\n        # STDOUT.puts \"#{score}: #{ccounts[score]} \" if @debug\n      end\n      print \"\\n\" if @debug\n    end\n    STDOUT.puts \"Found #{cycle} cycles.\" if @verbose\n  end\n\n  def make_plots\n    tmpio = Tempfile.new('interop')\n    puts \"Writing data to #{tmpio.path}...\" if @verbose\n\n    # print banner\n    (@min_qual..@max_qual).each do |qual|\n      tmpio.print \"q#{qual} \"\n      print \"q#{qual} \" if @debug\n    end\n    tmpio.print \"\\n\"\n    print \"\\n\" if @debug\n\n    # for each cycle, print number of bases with each quality value\n    (1..@max_cycle).each do |cycle|\n      (@min_qual..@max_qual).each do |qual|\n        tiles_total = 0\n        if not @counts[@lane][cycle].nil?\n          @counts[@lane][cycle].keys.sort.each do |tile|\n            tiles_total += @counts[@lane][cycle][tile][qual]\n          end\n          tmpio.print \"#{tiles_total} \"\n          print \"#{tiles_total} \" if @debug\n        end\n      end\n      tmpio.print \"\\n\"\n      print \"\\n\" if @debug\n    end\n\n    tmpio.close\n\n    if !@read_lengths.nil?\n      @read_starts = []\n      cycle = 1\n      @read_lengths.each do |len|\n        @read_starts.push(cycle) unless cycle == 1\n        cycle += len.to_i\n      end\n    end\n    \n    dirname = File.expand_path(File.dirname(__FILE__))\n    run_plotter(dirname+\"/plot_qscore_details.r\", tmpio.path, @details_plot)\n    run_plotter(dirname+\"/plot_qscore_summary.r\", tmpio.path, @summary_plot)\n\n    tmpio.unlink\n  end\n\n  def run_plotter(plotscript, datafile, plotfile)\n    return if plotfile.nil?\n    plotcmd = (\"#{plotscript} datafile=\\\\\\\"#{datafile}\\\\\\\" \" +\n               \"plotfile=\\\\\\\"#{plotfile}\\\\\\\"\" +\n               \"version=\\\\\\\"#{})\n    if !@read_lengths.nil?\n      plotcmd += \" read.starts=c\\\\(#{@read_starts.join(',')}\\\\)\"\n    end\n    puts \"Running cmd: #{plotcmd}\" if @verbose\n    if !system(plotcmd)\n      STDERR.puts \"error running R to make plot\"\n      exit 1\n    end\n  end\n\n  def print_lane_metrics(lane)\n    puts \"Lane #{lane}:\"\n    (1..@max_cycle).each do |cycle|\n      print \"Cycle #{cycle}:\"\n      ccounts = @counts[lane][cycle]\n      total_q20 = 0\n      total_q30 = 0\n      total = 0\n      weighted_sum = 0\n      (@min_qual..@max_qual).each do |qual|\n        total_q20 += ccounts[qual] if qual >= 20\n        total_q30 += ccounts[qual] if qual >= 30\n        total += ccounts[qual]\n        weighted_sum += qual * ccounts[qual]\n      end\n      average = \"%.2f\" % (weighted_sum.to_f / total.to_f)\n      q20_pct = \"%.2f\" % (100.0 * total_q20.to_f / total.to_f)\n      q30_pct = \"%.2f\" % (100.0 * total_q30.to_f / total.to_f)\n      print \" average #{average}, #{q30_pct}% >= Q30, #{q20_pct}% >= Q20\\n\"\n    end\n  end\n\n  def main\n    parse_args\n    read_metrics\n    make_plots\n  end\nend\n\nIlluminaQScores.new.main\n",
+			"file": "/Users/pbilling/Documents/DNAnexus/development_files/test_hiseq4000/qc_tools/illumina_qscores.rb",
+			"file_size": 11171,
+			"file_write_time": 1459287182000000,
+			"settings":
+			{
+				"buffer_size": 11205,
+				"line_ending": "Unix"
+			}
+		}
+	],
+	"build_system": "",
+	"command_palette":
+	{
+		"height": 392.0,
+		"selected_items":
+		[
+		],
+		"width": 392.0
+	},
+	"console":
+	{
+		"height": 0.0
+	},
+	"distraction_free":
+	{
+		"menu_visible": true,
+		"show_minimap": false,
+		"show_open_files": false,
+		"show_tabs": false,
+		"side_bar_visible": false,
+		"status_bar_visible": false
+	},
+	"file_history":
+	[
+		"/Users/pbilling/Documents/DNAnexus/development_files/test_hiseq4000/qc_tools/illumina_intensities.rb",
+		"/Users/pbilling/Documents/GitHub/trajectoread/external_resources/source/pdf_reports/1.0/qc_tools/illumina_qscores.rb",
+		"/Users/pbilling/Documents/GitHub/trajectoread/external_resources/source/pdf_reports/1.0/qc_tools/plot_qscore_summary.r",
+		"/Users/pbilling/Documents/GitHub/trajectoread/applets_source/bcl2fastq.py",
+		"/Users/pbilling/Documents/GitHub/trajectoread/applets_source/bwa_controller.py",
+		"/Users/pbilling/Documents/GitHub/DNAnexusSCGPM/applets/release_lane/dxapp.json.template",
+		"/Users/pbilling/Documents/GitHub/trajectoread/applet_config_templates/release_lane.template.json",
+		"/Users/pbilling/Documents/GitHub/trajectoread/applet_config_templates/bcl2fastq.template.json",
+		"/Users/pbilling/Documents/GitHub/trajectoread/applet_config_templates/qc_sample.template.json",
+		"/Users/pbilling/Documents/GitHub/DNAnexusSCGPM/pipeline_utils/app_utils.py",
+		"/Users/pbilling/Documents/GitHub/DNAnexusSCGPM/applets/release_lane/src/release_lane.py",
+		"/Users/pbilling/Documents/GitHub/DNAnexusSCGPM/pipeline_utils/conf.json",
+		"/Users/pbilling/Documents/GitHub/trajectoread/workflow_config_templates/wf_bcl2fastq_bwa_qc_release.json",
+		"/Users/pbilling/Documents/GitHub/trajectoread/applets_source/qc_controller.py",
+		"/Users/pbilling/Documents/GitHub/trajectoread/compare_DX_SCG_results2.py",
+		"/Users/pbilling/Documents/GitHub/trajectoread/get_scg_stats_csvs.py",
+		"/Users/pbilling/Documents/GitHub/trajectoread/scripts/analysis/compare_mapping_stats.py",
+		"/Users/pbilling/Documents/GitHub/trajectoread/compare_mapping_stats.py",
+		"/Users/pbilling/Documents/GitHub/trajectoread/workflow_config_templates/wf_bwa_qc.json",
+		"/Users/pbilling/Documents/GitHub/trajectoread/workflow_config_templates/wf_bcl2fastq_bwa_qc.json",
+		"/Users/pbilling/Documents/GitHub/trajectoread/get_lane_stats_files.py",
+		"/Users/pbilling/Documents/Code/get_seq_run_stats.py",
+		"/Users/pbilling/Downloads/lane.html",
+		"/Users/pbilling/Documents/GitHub/trajectoread/compare_DX_SCG_results.py",
+		"/Users/pbilling/Documents/GitHub/trajectoread/applet_config_templates/qc_controller.template.json",
+		"/Users/pbilling/Documents/GitHub/trajectoread/applets_source/map_sample.py",
+		"/Users/pbilling/Documents/GitHub/trajectoread/applet_config_templates/map_sample.template.json",
+		"/Users/pbilling/Documents/GitHub/autocopy/bin/autocopy.py",
+		"/Users/pbilling/Documents/GitHub/trajectoread/applet_config_templates/compute_sample_coverage.template.json",
+		"/Users/pbilling/Documents/GitHub/trajectoread/applet_config_templates/bwa_controller.template.json",
+		"/Users/pbilling/Documents/GitHub/trajectoread/applets_source/qc_sample.py",
+		"/Users/pbilling/Documents/GitHub/trajectoread/applets_source/generate_qc_report.py",
+		"/Users/pbilling/Documents/GitHub/trajectoread/mappings_coverage_track_generator-master/src/mctg.cpp",
+		"/Users/pbilling/Documents/GitHub/trajectoread/applets_source/igv_controller.py",
+		"/Users/pbilling/Documents/GitHub/trajectoread/workflow_config_templates/wf_bcl2fastq_bwa_cov_qc.json",
+		"/Users/pbilling/Documents/GitHub/trajectoread/workflow_config_templates/wf_bcl2fastq_qc.json",
+		"/Users/pbilling/Documents/GitHub/trajectoread/build_workflows/build_workflow.py",
+		"/Users/pbilling/Documents/GitHub/trajectoread/applet_config_templates/compressed_mappings_importer.template.json",
+		"/Users/pbilling/Documents/GitHub/trajectoread/applet_config_templates/generate_qc_report.template.json",
+		"/Users/pbilling/Documents/GitHub/trajectoread/internal_resources/c_programs/parseSam",
+		"/Users/pbilling/Documents/GitHub/trajectoread/applets_source/compressed_mappings_importer.sh",
+		"/Users/pbilling/Documents/GitHub/trajectoread/workflow_config_templates/archive/wf_bcl2fastq_bwa_cov_qc_2016-02-26.json",
+		"/Users/pbilling/Documents/GitHub/trajectoread/applet_config_templates/igv_controller.template.json",
+		"/Users/pbilling/Documents/GitHub/trajectoread/applets_source/compute_sample_coverage.py",
+		"/Users/pbilling/Documents/GitHub/trajectoread/internal_resources/internal_resources.json",
+		"/Users/pbilling/Documents/GitHub/DNAnexusSCGPM/applets/process_sample/src/process_sample.py",
+		"/Users/pbilling/Documents/GitHub/DNAnexusSCGPM/applets/process_sample/dxapp.json.template",
+		"/Users/pbilling/Documents/GitHub/DNAnexusSCGPM/applets/process_lane/src/process_lane.py",
+		"/Users/pbilling/Documents/GitHub/trajectoread/external_resources/Ubuntu-12.04/external_resources.json",
+		"/Users/pbilling/Documents/GitHub/DNAnexusSCGPM/remote_resources/in_root/extractChromosomes.py",
+		"/Users/pbilling/Documents/GitHub/DNAnexusSCGPM/remote_resources/in_root/checkProcessor.py",
+		"/Users/pbilling/Documents/GitHub/DNAnexusSCGPM/remote_resources/in_root/makeTable.py",
+		"/Users/pbilling/Documents/GitHub/trajectoread/external_resources/source/pdf_reports/1.0/create_pdf_reports.py",
+		"/Users/pbilling/Documents/GitHub/trajectoread/applets_source/test_applet.py",
+		"/Users/pbilling/Documents/GitHub/trajectoread/workflow_config_templates/wf_bc2lfastq_bwa_cov_qc.json",
+		"/Users/pbilling/Documents/GitHub/trajectoread/applets/qc_sample/2016-02-19_d529124/dxapp.json",
+		"/Users/pbilling/Documents/GitHub/trajectoread/applets/bcl2fastq/2016-02-17_57df5a6/dxapp.json",
+		"/Users/pbilling/Documents/GitHub/trajectoread/applets/map_sample/2016-02-16_57df5a6/dxapp.json",
+		"/Users/pbilling/Documents/GitHub/trajectoread/external_resources/Ubuntu-12.04/external_resources_2016-2-16.json",
+		"/Users/pbilling/Documents/GitHub/trajectoread/initiate_analysis.py",
+		"/Users/pbilling/Documents/GitHub/trajectoread/build_workflows/build_bcl2fastq_qc.py",
+		"/Users/pbilling/Documents/GitHub/trajectoread/workflow_config_templates/wf_bcl2fastq_bwa.json",
+		"/Users/pbilling/Documents/GitHub/trajectoread/build_workflows/build_bcl2fastq_bwa_qc.py",
+		"/Users/pbilling/Documents/GitHub/scgpm_lims/components/models.py",
+		"/Users/pbilling/Documents/GitHub/trajectoread/applets_source/initiate_workflow.py",
+		"/Users/pbilling/Documents/GitHub/trajectoread/build_workflows/OLD_build_bcl2fastq_bwa_qc.py",
+		"/Users/pbilling/Documents/GitHub/trajectoread/build_workflows/build_bcl2fastq-bwa_mem-qc.py",
+		"/Users/pbilling/Documents/GitHub/trajectoread/build_workflows/OLD_build_bcl2fastq_qc.py",
+		"/Users/pbilling/Documents/GitHub/trajectoread/build_workflows/build_bcl2fastq_bwa.py",
+		"/Users/pbilling/Documents/GitHub/trajectoread/applet_config_templates/bwa_mem_controller.template.json",
+		"/Users/pbilling/Documents/GitHub/trajectoread/applets_source/workflow_manager.py",
+		"/Users/pbilling/Documents/DNAnexus/development_files/build_workflow.template.json",
+		"/Users/pbilling/Documents/GitHub/autocopy/bin/dnanexus_upload.py",
+		"/Users/pbilling/Documents/GitHub/scgpm_lims/components/connection.py",
+		"/Users/pbilling/Documents/GitHub/trajectoread/build_workflows/build_HiSeq2000_bcl2fastq.py",
+		"/Users/pbilling/Documents/GitHub/trajectoread/applets_source/bwa_mem_controller.py",
+		"/Users/pbilling/Documents/GitHub/scgpm_lims/components/local.py",
+		"/Users/pbilling/Documents/GitHub/autocopy/bin/rundir.py",
+		"/Users/pbilling/Documents/GitHub/trajectoread/development_files/tar_files.txt",
+		"/Users/pbilling/Documents/GitHub/DNAnexusSCGPM/applets/compute_sample_coverage/dxapp.json",
+		"/Users/pbilling/Documents/GitHub/DNAnexusSCGPM/applets/compute_sample_coverage/src/compute_sample_coverage.py",
+		"/Users/pbilling/Documents/GitHub/trajectoread/external_resources/source/pdf_reports/1.0/qc_tools/illumina_intensities.rb",
+		"/Users/pbilling/Documents/GitHub/DNAnexusSCGPM/external_resources/source/pdf_reports/1.0/qc_tools/illumina_qscores.rb",
+		"/Users/pbilling/Documents/GitHub/DNAnexusSCGPM/applets/qc_sample/src/qc_sample.py",
+		"/Users/pbilling/Documents/GitHub/DNAnexusSCGPM/external_resources/source/pdf_reports/1.0/create_pdf_reports.py",
+		"/Users/pbilling/Documents/GitHub/DNAnexusSCGPM/external_resources/source/pdf_reports/1.0/qc_tools/plot_mismatch_details.r",
+		"/Users/pbilling/Documents/GitHub/trajectoread/internal_resources/python_packages/flowcell.py",
+		"/Users/pbilling/Documents/GitHub/trajectoread/development_files/dx_upload_lane.py",
+		"/Users/pbilling/Documents/GitHub/DNAnexusSCGPM/applets/qc_sample/dxapp.json.template",
+		"/Users/pbilling/Documents/GitHub/trajectoread/applets/qc_controller/2016-01-20_fc6411e/dxapp.json",
+		"/Users/pbilling/Documents/GitHub/trajectoread/build_workflows/build_bwa_mem-qc_sample.py",
+		"/Users/pbilling/Documents/GitHub/DNAnexusSCGPM/applets/process_lane/dxapp.json.template",
+		"/Users/pbilling/Documents/GitHub/trajectoread/applet_config_templates/test_applet.template.json",
+		"/Users/pbilling/Documents/GitHub/DNAnexusSCGPM/applets/casava_bcl_to_fastq/dxapp.json.template",
+		"/Users/pbilling/Documents/GitHub/trajectoread/build_workflows/build_HiSeq4000_bwa_mem_controller.py",
+		"/Users/pbilling/Documents/GitHub/DNAnexusSCGPM/Makefile",
+		"/Users/pbilling/Documents/GitHub/DNAnexusSCGPM/pipeline_utils/scripts/call_pu.py",
+		"/Users/pbilling/Documents/GitHub/DNAnexusSCGPM/remote_resources/src/collect_uniqueness_metrics.cpp",
+		"/Users/pbilling/Documents/GitHub/trajectoread/build_workflows/build_HiSeq4000_bcl2fastq.py",
+		"/Users/pbilling/Documents/GitHub/trajectoread/external_resources/Ubuntu-12.04/external_resources_2016-1-19.json",
+		"/Users/pbilling/Documents/GitHub/trajectoread/applets_source/qc_lane.py",
+		"/Users/pbilling/Documents/GitHub/trajectoread/applets/qc_sample/dxapp.json",
+		"/Users/pbilling/Documents/GitHub/trajectoread/build_workflows/build_qc_sample.py",
+		"/Users/pbilling/Documents/DNAnexus/bwa_mem_fastq_read_mapper/src/code.sh",
+		"/Users/pbilling/Documents/GitHub/DNAnexusSCGPM/applets/casava_bcl_to_fastq/src/casava_bcl_to_fastq.py",
+		"/Users/pbilling/Documents/GitHub/DNAnexusSCGPM/remote_resources/in_root/create_pdf_reports.py",
+		"/Users/pbilling/Documents/GitHub/DNAnexusSCGPM/scripts/process_run.sh",
+		"/Users/pbilling/Documents/Code/convert_fastq_file_names.py",
+		"/Users/pbilling/Documents/GitHub/trajectoread/build_workflows/build_HiSeq4000_bwa-mem_controller.py",
+		"/Users/pbilling/Documents/GitHub/trajectoread/applets_source/bcl2fastq_old.py",
+		"/Users/pbilling/Documents/GitHub/trajectoread/applets_source/bwa-mem_controller.py",
+		"/Users/pbilling/Documents/GitHub/trajectoread/applet_config_templates/bwa-mem_controller.template.json",
+		"/Users/pbilling/Library/Application Support/Sublime Text 2/Packages/User/Preferences.sublime-settings",
+		"/Users/pbilling/Documents/GitHub/trajectoread/applets_source/bcl2fastq_1.py",
+		"/Users/pbilling/Documents/GitHub/trajectoread/tar_files.txt",
+		"/Users/pbilling/Documents/GitHub/trajectoread/internal_resources/scripts/calculate_use_bases_mask.py",
+		"/Users/pbilling/Documents/GitHub/trajectoread/internal_resources/scripts/calculate_use_bases_mask_combined.py",
+		"/Users/pbilling/Documents/Code/bcl2fastq_scg.py",
+		"/Users/pbilling/Documents/Code/qsub/arrayjob_bcl2fastq2_customBaseMask_html.q",
+		"/Users/pbilling/Documents/Code/qsub/arrayjob_bcl2fastq2_noBarcode_html.q",
+		"/Users/pbilling/Documents/Code/qsub/arrayjob_bcl2fastq2_noBarcode.q",
+		"/Users/pbilling/Documents/GitHub/trajectoread/stdout_test.py",
+		"/Users/pbilling/Documents/GitHub/trajectoread/internal_resources/scripts/calculate_use_bases_mask_2.py",
+		"/Users/pbilling/Documents/GitHub/trajectoread/internal_resources/python_packages/scgpm_lims/__init__.py",
+		"/Users/pbilling/Documents/GitHub/trajectoread/applets/bcl2fastq/2015-12-21_c690c43/dxapp.json",
+		"/Users/pbilling/Library/Application Support/Sublime Text 2/Packages/Default/Preferences.sublime-settings",
+		"/Users/pbilling/Documents/GitHub/trajectoread/applets/bcl2fastq/2015-12-20_c690c43/dxapp.json",
+		"/Users/pbilling/Documents/GitHub/trajectoread/applet_config_templates/bcl2fastq.json.template"
+	],
+	"find":
+	{
+		"height": 35.0
+	},
+	"find_in_files":
+	{
+		"height": 0.0,
+		"where_history":
+		[
+			"external_resources.json",
+			"build_HiSeq4000_bcl2fastq.py"
+		]
+	},
+	"find_state":
+	{
+		"case_sensitive": true,
+		"find_history":
+		[
+			"readb",
+			"ios",
+			"IMAGE_INTENSITY",
+			"@call_summary_plot",
+			"@call_summary_plots",
+			"plot_call_summary",
+			"self.library",
+			"re",
+			"find_quantiles",
+			"create",
+			"qc_v",
+			"summary_plot",
+			"min_qual",
+			"max_qual",
+			"collect_insert_size_metrics",
+			"collect_alignment_summary_metrics",
+			"auth",
+			"my_auth",
+			"Token",
+			"dashboardContributeToken",
+			"dashboardContributeTooken",
+			"token",
+			"Auth",
+			"token",
+			"Auth",
+			"auth",
+			"Auth",
+			"EmailTakenError",
+			"Email",
+			"transfer_clone_project",
+			"dx_record",
+			"sunet_id",
+			"app_utils",
+			"Release",
+			"release",
+			"sponsor",
+			"personid",
+			"new_user",
+			"ensure",
+			"sunet",
+			"user",
+			"get_submitter_name",
+			"getPerson",
+			"bwa",
+			"timestamp",
+			"json",
+			"scg_runs_dir",
+			"org",
+			"Org",
+			"org",
+			"dx_htmls_dir",
+			"parse_lane_html",
+			"parse_demultiplex_stats",
+			"lane_name",
+			"RunsInProgress",
+			"dx_runs_dir",
+			"dx",
+			")\n",
+			"run_name, lane_index",
+			"lane_index",
+			"name_elements",
+			"lane_html_path",
+			"run_name",
+			"stats_file",
+			"compare",
+			"glob",
+			"run_name_elements",
+			"properties",
+			"machine",
+			"dx_runs_dir",
+			"fcid",
+			"self.details",
+			"library",
+			"lane_html",
+			"machine",
+			"bai",
+			"lane_html_name",
+			"upload",
+			"runParameters",
+			"Intens",
+			"step",
+			"dnanexus",
+			"self.LOG_FILE",
+			"dnanexus",
+			"initialize_lims_connection",
+			"createSubprocess",
+			"properties",
+			"lane_html",
+			"get_lane_barcode",
+			"print",
+			"upload",
+			"os",
+			"os.file",
+			"match",
+			"re",
+			"red",
+			"match",
+			"runParameters",
+			"bai",
+			"run_map_sample",
+			"bai",
+			"run_samtools_calmd",
+			"bai",
+			"bam",
+			"subjobs",
+			"upload",
+			"fastqc_jobs",
+			"fastq_jobs",
+			"run_fastqc",
+			"fastqc_reports",
+			"main",
+			"mismatch",
+			"1.18",
+			"tools_used",
+			"parents",
+			"/parents",
+			"bwa",
+			"library_id",
+			"mismatch_metrics",
+			"mismatch",
+			"]",
+			"mismatch_metrics",
+			"mismatch",
+			"bam_dict",
+			"Grouping",
+			"bam_dict",
+			"fastq_file",
+			"Uploaded fastq files"
+		],
+		"highlight": false,
+		"in_selection": false,
+		"preserve_case": false,
+		"regex": false,
+		"replace_history":
+		[
+			"lane_name",
+			"homeDir",
+			"QC_templates",
+			"download_file",
+			"qc_job.get_id()",
+			"dxpy.download_dxfile",
+			"-9",
+			"rsc_type",
+			"rsc",
+			"dxid"
+		],
+		"reverse": false,
+		"show_context": true,
+		"use_buffer2": true,
+		"whole_word": false,
+		"wrap": true
+	},
+	"groups":
+	[
+		{
+			"selected": 0,
+			"sheets":
+			[
+				{
+					"buffer": 0,
+					"file": "/Users/pbilling/Documents/DNAnexus/development_files/test_hiseq4000/qc_tools/plot_qscore_summary.r",
+					"settings":
+					{
+						"buffer_size": 1960,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								469,
+								469
+							]
+						],
+						"settings":
+						{
+							"syntax": "Packages/R/R.tmLanguage",
+							"tab_size": 2,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 0.0,
+						"zoom_level": 1.0
+					},
+					"type": "text"
+				},
+				{
+					"buffer": 1,
+					"file": "/Users/pbilling/Documents/DNAnexus/development_files/test_hiseq4000/qc_tools/illumina_qscores.out",
+					"settings":
+					{
+						"buffer_size": 17447,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								17447,
+								17447
+							]
+						],
+						"settings":
+						{
+							"auto_name": "q1 q2 q3 q4 q5 q6 q7",
+							"syntax": "Packages/Text/Plain text.tmLanguage"
+						},
+						"translation.x": 0.0,
+						"translation.y": 0.0,
+						"zoom_level": 1.0
+					},
+					"type": "text"
+				},
+				{
+					"buffer": 2,
+					"file": "/Users/pbilling/Documents/DNAnexus/development_files/test_hiseq4000/qc_tools/illumina_qscores.rb",
+					"settings":
+					{
+						"buffer_size": 11205,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								10119,
+								10119
+							]
+						],
+						"settings":
+						{
+							"syntax": "Packages/Ruby/Ruby.tmLanguage",
+							"tab_size": 2,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 236.0,
+						"zoom_level": 1.0
+					},
+					"type": "text"
+				}
+			]
+		}
+	],
+	"incremental_find":
+	{
+		"height": 0.0
+	},
+	"input":
+	{
+		"height": 35.0
+	},
+	"layout":
+	{
+		"cells":
+		[
+			[
+				0,
+				0,
+				1,
+				1
+			]
+		],
+		"cols":
+		[
+			0.0,
+			1.0
+		],
+		"rows":
+		[
+			0.0,
+			1.0
+		]
+	},
+	"menu_visible": true,
+	"replace":
+	{
+		"height": 64.0
+	},
+	"save_all_on_build": true,
+	"select_file":
+	{
+		"height": 0.0,
+		"selected_items":
+		[
+		],
+		"width": 0.0
+	},
+	"select_project":
+	{
+		"height": 0.0,
+		"selected_items":
+		[
+		],
+		"width": 0.0
+	},
+	"show_minimap": true,
+	"show_open_files": true,
+	"show_tabs": true,
+	"side_bar_visible": true,
+	"side_bar_width": 259.0,
+	"status_bar_visible": true
+}

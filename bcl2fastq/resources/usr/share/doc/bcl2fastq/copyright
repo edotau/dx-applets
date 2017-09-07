@@ -1,0 +1,27 @@
+This package was debianized by the alien program by converting
+a binary .rpm package on Mon, 03 Aug 2015 22:33:43 +0000
+
+Copyright: unknown
+
+Information from the binary package:
+Name        : bcl2fastq
+Version     : 1.8.4
+Release     : 1
+Architecture: x86_64
+Install Date: (not installed)
+Group       : unknown
+Size        : 1091394147
+License     : unknown
+Signature   : (none)
+Source RPM  : bcl2fastq-1.8.4-1.src.rpm
+Build Date  : Mon 18 Mar 2013 06:39:00 PM UTC
+Build Host  : ukch-dev-lndt02.chuk.illumina.com
+Relocations : (not relocatable)
+Vendor      : Illumina
+Summary     : bcl2fastq built using CMake
+Description :
+DESCRIPTION
+===========
+
+This is an installer created using CPack (http://www.cmake.org). No additional installation instructions provided.
+
