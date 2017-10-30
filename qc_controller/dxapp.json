@@ -96,7 +96,9 @@
       }
     },
     "file": "src/code.py",
-    "release": "12.04",
+    "release": "14.04",
+    "restartableEntryPoints": "all",
+    "executionPolicy": {"restartOn": {"JMInternalError": 2, "ExecutionError": 2, "UnresponsiveWorker": 5}},
     "interpreter": "python2.7",
     "distribution": "Ubuntu"
   },
